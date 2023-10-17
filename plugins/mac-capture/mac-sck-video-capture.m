@@ -74,7 +74,7 @@ API_AVAILABLE(macos(12.5)) static void sck_video_capture_destroy(void *data)
     bfree(sc);
 }
 
-API_AVAILABLE(macos(12.5)) static bool init_screen_stream(struct screen_capture *sc)
+API_AVAILABLE(macos(12.5)) static bool init_screen_stream(struct screen_capture *sc, obs_data_t *settings)
 {
     SCContentFilter *content_filter;
     if (sc->capture_failed) {
@@ -147,7 +147,22 @@ API_AVAILABLE(macos(12.5)) static bool init_screen_stream(struct screen_capture 
                         break;
                     }
                 }
+                // If no window with a matching ID exists, look for one with a matching title and owning application
+                if (target_window == nil) {
+                    for (SCWindow *window in sc->shareable_content.windows) {
+                        if ([window.title isEqualToString:sc->window_title] &&
+                            [window.owningApplication.bundleIdentifier isEqualToString:sc->application_id]) {
+                            target_window = window;
+                            break;
+                        }
+                    }
+                }
             }
+            //Debuggernaut TODO: Why was this code added?
+//             else {
+//                target_window = [sc->shareable_content.windows objectAtIndex:0];
+//                sc->window = target_window.windowID;
+//            }
             if (target_window == nil) {
                 MACCAP_ERR("init_screen_stream: Invalid target window ID:  %u\n", sc->window);
                 os_sem_post(sc->shareable_content_available);
@@ -160,6 +175,12 @@ API_AVAILABLE(macos(12.5)) static bool init_screen_stream(struct screen_capture 
 
                 [sc->stream_properties setWidth:(size_t) target_window.frame.size.width];
                 [sc->stream_properties setHeight:(size_t) target_window.frame.size.height];
+
+                sc->window_title = [target_window.title retain];
+                sc->application_id = [target_window.owningApplication.bundleIdentifier retain];
+                obs_data_set_int(settings, "window", target_window.windowID);
+                obs_data_set_string(settings, "window_title", sc->window_title.UTF8String);
+                obs_data_set_string(settings, "application", sc->application_id.UTF8String);
 
                 if (@available(macOS 14.2, *)) {
                     [sc->stream_properties setIncludeChildWindows:YES];
@@ -280,6 +301,7 @@ API_AVAILABLE(macos(12.5)) static void *sck_video_capture_create(obs_data_t *set
     sc->show_empty_names = obs_data_get_bool(settings, "show_empty_names");
     sc->show_hidden_windows = obs_data_get_bool(settings, "show_hidden_windows");
     sc->window = (CGWindowID) obs_data_get_int(settings, "window");
+    sc->window_title = [[NSString alloc] initWithUTF8String:obs_data_get_string(settings, "window_title")];
     sc->capture_type = (unsigned int) obs_data_get_int(settings, "type");
     sc->audio_only = false;
 
@@ -298,7 +320,7 @@ API_AVAILABLE(macos(12.5)) static void *sck_video_capture_create(obs_data_t *set
     sc->application_id = [[NSString alloc] initWithUTF8String:obs_data_get_string(settings, "application")];
     pthread_mutex_init(&sc->mutex, NULL);
 
-    if (!init_screen_stream(sc))
+    if (!init_screen_stream(sc, settings))
         goto fail;
 
     return sc;
@@ -404,6 +426,7 @@ static void sck_video_capture_defaults(obs_data_t *settings)
     obs_data_set_default_string(settings, "application", NULL);
     obs_data_set_default_int(settings, "type", ScreenCaptureDisplayStream);
     obs_data_set_default_int(settings, "window", kCGNullWindowID);
+    obs_data_set_default_string(settings, "window_title", NULL);
     obs_data_set_default_bool(settings, "show_cursor", true);
     obs_data_set_default_bool(settings, "hide_obs", false);
     obs_data_set_default_bool(settings, "show_empty_names", false);
@@ -424,6 +447,8 @@ API_AVAILABLE(macos(12.5)) static void sck_video_capture_update(void *data, obs_
 
     CGDirectDisplayID display = get_display_migrate_settings(settings);
 
+    const char *window_title = obs_data_get_string(settings, "window_title");
+    sc->window_title = [[NSString alloc] initWithUTF8String:window_title];
     NSString *application_id = [[NSString alloc] initWithUTF8String:obs_data_get_string(settings, "application")];
     bool show_cursor = obs_data_get_bool(settings, "show_cursor");
     bool hide_obs = obs_data_get_bool(settings, "hide_obs");
@@ -465,7 +490,7 @@ API_AVAILABLE(macos(12.5)) static void sck_video_capture_update(void *data, obs_
     sc->hide_obs = hide_obs;
     sc->show_empty_names = show_empty_names;
     sc->show_hidden_windows = show_hidden_windows;
-    init_screen_stream(sc);
+    init_screen_stream(sc, settings);
 
     obs_leave_graphics();
 }
@@ -556,7 +581,9 @@ static bool reactivate_capture(obs_properties_t *props __unused, obs_property_t 
     obs_enter_graphics();
     destroy_screen_stream(sc);
     sc->capture_failed = false;
-    init_screen_stream(sc);
+    obs_data_t *settings = obs_source_get_settings(sc->source);
+    init_screen_stream(sc, settings);
+    obs_data_release(settings);
     obs_leave_graphics();
     obs_property_set_enabled(property, false);
     return true;
