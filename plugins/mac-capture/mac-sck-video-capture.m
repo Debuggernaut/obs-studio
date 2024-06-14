@@ -148,7 +148,7 @@ API_AVAILABLE(macos(12.5)) static bool init_screen_stream(struct screen_capture 
                     }
                 }
                 // If no window with a matching ID exists, look for one with a matching title and owning application
-                if (target_window == nil) {
+                if (target_window == nil && sc->match_by_title) {
                     for (SCWindow *window in sc->shareable_content.windows) {
                         if ([window.title isEqualToString:sc->window_title] &&
                             [window.owningApplication.bundleIdentifier isEqualToString:sc->application_id]) {
@@ -297,6 +297,7 @@ API_AVAILABLE(macos(12.5)) static void *sck_video_capture_create(obs_data_t *set
 
     sc->source = source;
     sc->hide_cursor = !obs_data_get_bool(settings, "show_cursor");
+    sc->match_by_title = obs_data_get_bool(settings, "match_by_title");
     sc->hide_obs = obs_data_get_bool(settings, "hide_obs");
     sc->show_empty_names = obs_data_get_bool(settings, "show_empty_names");
     sc->show_hidden_windows = obs_data_get_bool(settings, "show_hidden_windows");
@@ -428,6 +429,7 @@ static void sck_video_capture_defaults(obs_data_t *settings)
     obs_data_set_default_int(settings, "window", kCGNullWindowID);
     obs_data_set_default_string(settings, "window_title", NULL);
     obs_data_set_default_bool(settings, "show_cursor", true);
+    obs_data_set_default_bool(settings, "match_by_title", false);
     obs_data_set_default_bool(settings, "hide_obs", false);
     obs_data_set_default_bool(settings, "show_empty_names", false);
     obs_data_set_default_bool(settings, "show_hidden_windows", false);
@@ -618,6 +620,8 @@ API_AVAILABLE(macos(12.5)) static obs_properties_t *sck_video_capture_properties
         obs_properties_add_bool(props, "show_hidden_windows", obs_module_text("WindowUtils.ShowHidden"));
 
     obs_properties_add_bool(props, "show_cursor", obs_module_text("DisplayCapture.ShowCursor"));
+
+    obs_properties_add_bool(props, "match_by_title", obs_module_text("DisplayCapture.MatchByTitle"));
 
     obs_property_t *hide_obs = obs_properties_add_bool(props, "hide_obs", obs_module_text("DisplayCapture.HideOBS"));
     obs_property_t *reactivate =
